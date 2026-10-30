@@ -1,0 +1,91 @@
+name: Watch upstream & security
+# 每天检查：mihomo 新版本、Go 工具链安全更新、依赖漏洞、mihomo 安全公告。
+# 有变化则自动修复、提升版本号并发布；客户端会在下次检查时自动安装。
+on:
+  schedule:
+    - cron: '23 1 * * *'   # 每天 UTC 01:23（北京时间 09:23）
+  workflow_dispatch:
+permissions:
+  contents: write
+  issues: write
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.decide.outputs.release }}
+      tag: ${{ steps.decide.outputs.tag }}
+      security: ${{ steps.decide.outputs.security }}
+      notes: ${{ steps.decide.outputs.notes }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          check-latest: true
+      - id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          GOVULN="$(go env GOPATH)/bin/govulncheck"
+          reasons=(); security=false
+
+          # 1. mihomo 新版本
+          latest=$(gh api repos/MetaCubeX/mihomo/releases/latest --jq .tag_name)
+          if [ "$latest" != "$(cat core-version.txt)" ]; then
+            reasons+=("mihomo $(cat core-version.txt) → $latest"); echo "$latest" > core-version.txt
+          fi
+
+          # 2. Go 工具链（标准库安全修复）
+          gov=$(go env GOVERSION)
+          if [ "$gov" != "$(cat build-go-version.txt)" ]; then
+            reasons+=("Go 工具链 → $gov"); echo "$gov" > build-go-version.txt; security=true
+          fi
+
+          # 3. 本程序依赖漏洞：自动升级到修复版本
+          if ! "$GOVULN" ./... > /tmp/vuln.txt; then
+            fixes=$("$GOVULN" -format json ./... | scripts/vulnfix.sh)
+            go mod tidy && go test ./...
+            reasons+=("修复本程序依赖漏洞: $(echo $fixes)"); security=true
+          fi
+
+          # 4. mihomo 源码依赖出现新的可修复漏洞
+          git clone -q --depth 1 --branch "$(cat core-version.txt)" https://github.com/MetaCubeX/mihomo.git /tmp/mihomo
+          fp=$(cd /tmp/mihomo && "$GOVULN" -format json ./... 2>/dev/null | jq -r 'select(.finding) | .finding | select(.fixed_version != null and .trace[0].module != "stdlib") | .osv' | sort -u | sha256sum | cut -c1-16)
+          if [ "$fp" != "$(cat core-vuln-fingerprint.txt 2>/dev/null || echo none)" ]; then
+            echo "$fp" > core-vuln-fingerprint.txt
+            reasons+=("mihomo 依赖漏洞状态变化，重新构建并自动修补"); security=true
+          fi
+
+          # 5. mihomo 官方安全公告 → 开 issue 提醒
+          gh api "repos/MetaCubeX/mihomo/security-advisories?state=published" --jq '.[] | "\(.ghsa_id)\t\(.severity)\t\(.summary)"' 2>/dev/null > /tmp/adv.txt || true
+          touch .github/seen-advisories.txt
+          while IFS=$'\t' read -r id sev summary; do
+            [ -z "$id" ] && continue
+            grep -qx "$id" .github/seen-advisories.txt && continue
+            echo "$id" >> .github/seen-advisories.txt
+            gh issue create --title "[mihomo 安全公告] $sev: $summary" --body "https://github.com/MetaCubeX/mihomo/security/advisories/$id
+          若已在新版本修复，本工作流会自动发布更新。" || true
+            reasons+=("新安全公告 $id"); security=true
+          done < /tmp/adv.txt
+
+          if git diff --quiet; then echo "release=false" >> "$GITHUB_OUTPUT"; echo "无变化"; exit 0; fi
+          [ ${#reasons[@]} -eq 0 ] && reasons+=("例行更新")
+
+          IFS=. read -r ma mi pa < VERSION; ver="$ma.$mi.$((pa+1))"; echo "$ver" > VERSION
+          notes=$(IFS='；'; echo "${reasons[*]}")
+          git config user.name "safeclash-bot"; git config user.email "safeclash-bot@users.noreply.github.com"
+          git commit -am "自动更新 v$ver: $notes"
+          git tag "v$ver"; git push origin HEAD "v$ver"
+          { echo "release=true"; echo "tag=v$ver"; echo "security=$security"; echo "notes=$notes"; } >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: check
+    if: needs.check.outputs.release == 'true'
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.check.outputs.tag }}
+      security: ${{ needs.check.outputs.security == 'true' }}
+      notes: ${{ needs.check.outputs.notes }}
+    secrets: inherit

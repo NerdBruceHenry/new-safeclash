@@ -1,0 +1,72 @@
+name: Release
+# 构建 SafeClash + 从源码构建 mihomo，生成清单并用你的私钥签名后发布。
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+      security:
+        type: boolean
+        default: false
+      notes:
+        type: string
+        default: ''
+permissions:
+  contents: write
+concurrency:
+  group: release
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          check-latest: true
+      - name: 测试与漏洞扫描（有漏洞则不发布）
+        run: |
+          go vet ./...
+          go test ./...
+          go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      - name: 构建 SafeClash
+        run: scripts/build-app.sh "${TAG#v}" "${{ github.repository }}" dist
+      - name: 从源码构建 mihomo 核心
+        run: scripts/build-core.sh "$(cat core-version.txt)" dist
+      - name: 生成并签名清单
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          NOTES_IN: ${{ inputs.notes }}
+        run: |
+          test -n "$SIGNING_KEY" || { echo "::error::未配置 SIGNING_KEY secret"; exit 1; }
+          SEC=""; [ "${{ inputs.security }}" = "true" ] && SEC="-security"
+          go run ./cmd/sctool manifest -dir dist -app-version "${TAG#v}" -core-version "$(cat core-version.txt)" $SEC -notes "$NOTES_IN"
+          go run ./cmd/sctool sign dist/manifest.json
+          go run ./cmd/sctool verify -pub "$(cat signing.pub)" dist/manifest.json
+          (cd dist && sha256sum safeclash-* mihomo-* > SHA256SUMS.txt)
+      - name: 发布
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTES_IN: ${{ inputs.notes }}
+        run: |
+          NOTES="核心: mihomo $(cat core-version.txt) · Go: $(go env GOVERSION)
+          $NOTES_IN
+
+          $(cat dist/core-source.txt)
+          $( [ -f dist/core-patches.txt ] && { echo '自动修补的依赖:'; cat dist/core-patches.txt; } )"
+          # 若已在网页上手动创建了同名 release，则把文件上传进去，而不是失败
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+            gh release edit "$TAG" --title "SafeClash $TAG" --notes "$NOTES" --latest
+          else
+            gh release create "$TAG" dist/* --title "SafeClash $TAG" --notes "$NOTES" --latest
+          fi

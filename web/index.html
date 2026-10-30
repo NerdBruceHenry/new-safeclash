@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SafeClash</title>
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<header>
+  <div class="brand">SafeClash</div>
+  <div class="status"><span id="dot" class="dot"></span><span id="statusText">…</span></div>
+  <div class="seg" id="modeSeg">
+    <button data-mode="rule">规则</button><button data-mode="global">全局</button><button data-mode="direct">直连</button>
+  </div>
+  <div class="traffic"><span>↑ <b id="up">0 B/s</b></span><span>↓ <b id="down">0 B/s</b></span></div>
+  <button id="powerBtn" class="primary">启动</button>
+</header>
+<nav id="tabs">
+  <button data-tab="home" class="active">概览</button>
+  <button data-tab="proxies">代理</button>
+  <button data-tab="profiles">订阅</button>
+  <button data-tab="conns">连接</button>
+  <button data-tab="logs">日志</button>
+  <button data-tab="settings">设置</button>
+</nav>
+<main>
+  <section id="tab-home" class="tab active">
+    <div id="alerts"></div>
+    <div class="grid">
+      <div class="card"><h3>系统代理</h3><p class="muted">让浏览器等应用通过本机端口上网</p><label class="switch"><input type="checkbox" id="sysProxy"><span></span></label></div>
+      <div class="card"><h3>TUN 模式</h3><p class="muted">接管所有应用流量（需要管理员/root 权限）</p><label class="switch"><input type="checkbox" id="tun"><span></span></label></div>
+      <div class="card"><h3>当前配置</h3><p id="curProfile" class="big">—</p></div>
+      <div class="card"><h3>核心</h3><p id="coreInfo" class="big">—</p><p id="coreSource" class="muted"></p></div>
+      <div class="card"><h3>应用</h3><p id="appInfo" class="big">—</p><p id="updInfo" class="muted"></p></div>
+      <div class="card"><h3>代理端口</h3><p id="portInfo" class="big">—</p><p class="muted">HTTP + SOCKS5 混合端口，仅本机可用</p></div>
+    </div>
+  </section>
+
+  <section id="tab-proxies" class="tab">
+    <div class="toolbar"><button id="refreshProxies">刷新</button><span class="muted">点击节点切换；点击「测速」检测延迟</span></div>
+    <div id="groups"></div>
+  </section>
+
+  <section id="tab-profiles" class="tab">
+    <div class="card">
+      <h3>添加订阅</h3>
+      <div class="row"><input id="subName" placeholder="名称（可选）"><input id="subUrl" class="grow" placeholder="Clash 订阅链接 https://..."><button id="addSub" class="primary">添加</button></div>
+      <details><summary>或粘贴本地配置 YAML</summary>
+        <textarea id="subContent" rows="8" placeholder="粘贴 Clash/mihomo 配置"></textarea>
+        <button id="addLocal">导入</button>
+      </details>
+    </div>
+    <div id="profileList"></div>
+  </section>
+
+  <section id="tab-conns" class="tab">
+    <div class="toolbar"><input id="connFilter" placeholder="过滤主机/规则/节点"><span id="connCount" class="muted"></span><button id="closeAll" class="danger">全部断开</button></div>
+    <div class="tablewrap"><table><thead><tr><th>主机</th><th>网络</th><th>规则</th><th>节点链</th><th>上传</th><th>下载</th><th></th></tr></thead><tbody id="connBody"></tbody></table></div>
+  </section>
+
+  <section id="tab-logs" class="tab">
+    <div class="toolbar">
+      <select id="logLevel"><option value="debug">debug</option><option value="info" selected>info</option><option value="warning">warning</option><option value="error">error</option></select>
+      <button id="logPause">暂停</button><button id="logClear">清空</button><button id="coreLogs">核心输出</button>
+    </div>
+    <pre id="logBox"></pre>
+  </section>
+
+  <section id="tab-settings" class="tab">
+    <div class="card form">
+      <h3>代理</h3>
+      <label>混合端口 <input type="number" id="s_mixed_port" min="1024" max="65535"></label>
+      <label><input type="checkbox" id="s_allow_lan"> 允许局域网连接 <span class="warn">（开启后同一网络的其他设备可使用你的代理）</span></label>
+      <label><input type="checkbox" id="s_ipv6"> 启用 IPv6</label>
+      <label>日志级别 <select id="s_log_level"><option>debug</option><option>info</option><option>warning</option><option>error</option><option>silent</option></select></label>
+      <label>系统代理绕过（每行一个）<textarea id="s_bypass" rows="5"></textarea></label>
+    </div>
+    <div class="card form">
+      <h3>启动</h3>
+      <label><input type="checkbox" id="s_auto_start"> 开机自启</label>
+      <label><input type="checkbox" id="s_auto_connect"> 打开应用时自动连接</label>
+    </div>
+    <div class="card form">
+      <h3>安全更新</h3>
+      <p class="muted">只接受由你的私钥签名的版本。核心由你的 GitHub Actions 从 mihomo 源码构建，并自动修补已知漏洞。</p>
+      <label><input type="checkbox" id="s_auto_update"> 自动下载并安装更新</label>
+      <label>检查间隔（小时）<input type="number" id="s_update_interval_hours" min="1" max="168"></label>
+      <label><input type="checkbox" id="s_update_via_proxy"> 通过本地代理下载更新和订阅</label>
+      <div class="row"><button id="checkUpd">检查更新</button><button id="applyUpd" class="primary">立即更新</button></div>
+      <pre id="updBox" class="small"></pre>
+    </div>
+    <div class="row"><button id="saveSettings" class="primary">保存设置</button><span class="grow"></span><button id="quitBtn" class="danger">退出 SafeClash</button></div>
+    <p class="muted" id="dataDir"></p>
+  </section>
+</main>
+<div id="toast"></div>
+<script src="/assets/app.js"></script>
+</body>
+</html>

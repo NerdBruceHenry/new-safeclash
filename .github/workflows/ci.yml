@@ -1,0 +1,25 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          check-latest: true
+      - run: go vet ./...
+      - run: go test -race ./...
+      - name: 漏洞扫描
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      - name: 跨平台编译检查
+        run: |
+          for t in windows/amd64 darwin/arm64 linux/amd64; do
+            GOOS=${t%/*} GOARCH=${t#*/} go build -o /dev/null .
+          done
