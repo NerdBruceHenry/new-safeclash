@@ -18,6 +18,8 @@ jobs:
       notes: ${{ steps.decide.outputs.notes }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # 需要全部标签来计算下一个版本号
       - uses: actions/setup-go@v7
         with:
           go-version: stable
@@ -73,7 +75,9 @@ jobs:
           if git diff --quiet; then echo "release=false" >> "$GITHUB_OUTPUT"; echo "无变化"; exit 0; fi
           [ ${#reasons[@]} -eq 0 ] && reasons+=("例行更新")
 
-          IFS=. read -r ma mi pa < VERSION; ver="$ma.$mi.$((pa+1))"; echo "$ver" > VERSION
+          # 以 VERSION 和已有标签中较大者为基础（网页上手动发布的版本不会更新 VERSION）
+          base=$(printf '%s\n%s\n' "$(cat VERSION)" "$(git tag -l 'v*' | sed 's/^v//')" | sort -V | tail -n1)
+          IFS=. read -r ma mi pa <<< "$base"; ver="$ma.$mi.$((pa+1))"; echo "$ver" > VERSION
           notes=$(IFS='；'; echo "${reasons[*]}")
           git config user.name "safeclash-bot"; git config user.email "safeclash-bot@users.noreply.github.com"
           git commit -am "自动更新 v$ver: $notes"

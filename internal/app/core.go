@@ -282,6 +282,11 @@ func (c *Core) Stop() {
 
 func (c *Core) Logs() []string { return c.logs.snapshot() }
 
+// LogMark 与 LogsSince 配合使用，只读取某一时刻之后的核心日志。
+func (c *Core) LogMark() int { return c.logs.count() }
+
+func (c *Core) LogsSince(mark int) []string { return c.logs.since(mark) }
+
 func freePort() (int, error) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -328,15 +333,31 @@ type ring struct {
 	mu    sync.Mutex
 	max   int
 	lines []string
+	total int // 累计写入的行数
 }
 
 func (r *ring) add(s string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.total++
 	r.lines = append(r.lines, s)
 	if len(r.lines) > r.max {
 		r.lines = r.lines[len(r.lines)-r.max:]
 	}
+}
+
+// since 返回累计第 n 行之后写入的日志。
+func (r *ring) since(n int) []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	k := min(r.total-n, len(r.lines))
+	return append([]string(nil), r.lines[len(r.lines)-k:]...)
+}
+
+func (r *ring) count() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.total
 }
 
 func (r *ring) snapshot() []string {

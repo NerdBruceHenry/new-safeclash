@@ -79,6 +79,9 @@ async function refresh() {
   document.querySelectorAll('#modeSeg button').forEach((b) => b.classList.toggle('active', b.dataset.mode === s.mode));
   $('sysProxy').checked = s.system_proxy;
   $('tun').checked = s.tun;
+  const ts = state.tun;
+  $('tunState').textContent = (state.admin ? '当前权限：管理员' : '当前权限：普通用户') +
+    (s.tun && state.running && ts.checked ? (ts.active ? ' · ✔ 已生效' : ' · ✘ 未生效') : '');
   const prof = s.profiles.find((p) => p.id === s.active_profile);
   $('curProfile').textContent = prof ? prof.name : '未选择';
   $('coreInfo').textContent = state.core && state.core.version ? 'mihomo ' + state.core.version : '未安装';
@@ -94,6 +97,8 @@ async function refresh() {
   const alerts = $('alerts');
   alerts.replaceChildren();
   if (state.core_error) alerts.append(h('div', { class: 'alert bad' }, state.core_error));
+  if (s.tun && state.running && state.tun.checked && !state.tun.active)
+    alerts.append(h('div', { class: 'alert bad' }, 'TUN 未能启动，目前只有遵循系统代理的应用在走代理。原因：' + state.tun.error));
   if (u.last_error) alerts.append(h('div', { class: 'alert warn' }, '更新：' + u.last_error));
   if ((u.app_available || u.core_available) && u.security)
     alerts.append(h('div', { class: 'alert bad' }, '有安全修复更新可用，请到「设置」中立即更新。'));

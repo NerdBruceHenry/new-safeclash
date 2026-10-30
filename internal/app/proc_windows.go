@@ -65,3 +65,13 @@ func afterStart(cmd *exec.Cmd) {
 func stopProcess(cmd *exec.Cmd) { cmd.Process.Kill() }
 
 func killStaleCore(Paths) {}
+
+// isElevated 报告当前进程是否以管理员身份运行（TUN 需要）。
+func isElevated() bool {
+	p := syscall.NewLazyDLL("shell32.dll").NewProc("IsUserAnAdmin")
+	if p.Find() != nil {
+		return false
+	}
+	r, _, _ := p.Call()
+	return r != 0
+}

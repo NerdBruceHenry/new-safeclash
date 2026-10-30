@@ -232,6 +232,8 @@ func (a *App) apiStatus(w http.ResponseWriter, r *http.Request) {
 		"core_error":   coreErr,
 		"settings":     a.store.Get(),
 		"update":       a.UpdateStatus(),
+		"tun":          a.TunStatus(),
+		"admin":        isElevated(),
 		"data_dir":     a.paths.Root,
 	}, nil)
 }

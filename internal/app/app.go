@@ -21,6 +21,9 @@ type App struct {
 	upd   updater
 	log   *log.Logger
 
+	tunMu sync.Mutex
+	tunSt TunStatus
+
 	proxyMu     sync.Mutex
 	proxyActive bool // 本进程是否设置过系统代理
 
@@ -94,16 +97,25 @@ func (a *App) buildConfig(controller, secret string) ([]byte, error) {
 }
 
 func (a *App) StartCore() error {
+	mark := a.core.LogMark()
+	a.setTun(TunStatus{})
 	if err := a.core.Start(a.buildConfig); err != nil {
 		a.applySystemProxy(false)
 		return err
 	}
-	return a.applySystemProxy(a.store.Get().SystemProxy)
+	if err := a.applySystemProxy(a.store.Get().SystemProxy); err != nil {
+		return err
+	}
+	if a.store.Get().Tun {
+		a.checkTun(mark)
+	}
+	return nil
 }
 
 func (a *App) StopCore() {
 	a.applySystemProxy(false)
 	a.core.Stop()
+	a.setTun(TunStatus{})
 }
 
 // applySystemProxy 只在核心运行时开启系统代理，避免核心停止后断网。
@@ -188,7 +200,13 @@ func (a *App) ApplySettings(p SettingsPatch) error {
 	}
 	// 需要重启核心的设置
 	if s.MixedPort != old.MixedPort || s.AllowLan != old.AllowLan || s.Tun != old.Tun || s.IPv6 != old.IPv6 {
-		return a.StartCore()
+		if err := a.StartCore(); err != nil {
+			return err
+		}
+		if st := a.TunStatus(); s.Tun && !st.Active {
+			return errors.New("核心已启动，但 TUN 未生效：" + st.Error)
+		}
+		return nil
 	}
 	if s.Mode != old.Mode || s.LogLevel != old.LogLevel {
 		if err := a.core.Patch(map[string]any{"mode": s.Mode, "log-level": s.LogLevel}); err != nil {
